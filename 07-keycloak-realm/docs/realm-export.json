@@ -1,0 +1,302 @@
+{
+  "realm": "plateforme-electronique",
+  "enabled": true,
+  "displayName": "Plateforme Électronique de Paiement",
+  "displayNameHtml": "<b>Plateforme Électronique</b> de Paiement",
+  "loginTheme": "keycloak",
+  "sslRequired": "none",
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": false,
+  "rememberMe": true,
+  "verifyEmail": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "maxFailureWaitSeconds": 900,
+  "failureFactor": 5,
+  "accessTokenLifespan": 900,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "offlineSessionIdleTimeout": 2592000,
+  "accessCodeLifespan": 60,
+  "accessCodeLifespanLogin": 1800,
+  "defaultSignatureAlgorithm": "RS256",
+
+  "roles": {
+    "realm": [
+      {
+        "name": "ADMIN",
+        "description": "Administrateur de la plateforme — accès complet",
+        "composite": false
+      },
+      {
+        "name": "USER",
+        "description": "Utilisateur standard — consultation et paiement",
+        "composite": false
+      },
+      {
+        "name": "MERCHANT",
+        "description": "Marchand — gestion des factures et abonnements",
+        "composite": false
+      },
+      {
+        "name": "OPERATOR",
+        "description": "Opérateur — supervision et support",
+        "composite": false
+      }
+    ],
+    "client": {
+      "plateforme-frontend": [
+        {
+          "name": "frontend-user",
+          "description": "Rôle par défaut pour les utilisateurs du frontend"
+        }
+      ],
+      "api-gateway": [
+        {
+          "name": "gateway-admin",
+          "description": "Accès admin via le gateway"
+        }
+      ]
+    }
+  },
+
+  "defaultRoles": ["USER"],
+
+  "requiredCredentials": ["password"],
+
+  "clients": [
+    {
+      "clientId": "plateforme-frontend",
+      "name": "Plateforme Frontend React",
+      "description": "Client public SPA React — Authorization Code Flow avec PKCE",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "rootUrl": "http://localhost:30180",
+      "baseUrl": "/",
+      "redirectUris": [
+        "http://localhost:30180/*",
+        "http://plateforme.local/*",
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:30180",
+        "http://plateforme.local",
+        "http://localhost:3000",
+        "+"
+      ],
+      "adminUrl": "http://localhost:30180",
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:30180/*##http://plateforme.local/*"
+      },
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "roles",
+        "web-origins"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access"
+      ]
+    },
+    {
+      "clientId": "api-gateway",
+      "name": "API Gateway — Spring Cloud Gateway",
+      "description": "Client confidentiel pour la validation JWT côté gateway",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "bearerOnly": false,
+      "protocol": "openid-connect",
+      "secret": "gateway-secret-change-me-in-prod",
+      "attributes": {
+        "use.refresh.tokens": "true"
+      },
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "roles"
+      ]
+    },
+    {
+      "clientId": "payment-service",
+      "name": "Payment Service",
+      "description": "Client confidentiel pour le service de paiement",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "bearerOnly": true,
+      "protocol": "openid-connect",
+      "secret": "payment-secret-change-me-in-prod"
+    },
+    {
+      "clientId": "subscription-service",
+      "name": "Subscription Service",
+      "description": "Client confidentiel pour le service d'abonnement",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "bearerOnly": true,
+      "protocol": "openid-connect",
+      "secret": "subscription-secret-change-me-in-prod"
+    },
+    {
+      "clientId": "user-auth-service",
+      "name": "User Auth Service",
+      "description": "Client confidentiel avec Admin API access",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "bearerOnly": false,
+      "protocol": "openid-connect",
+      "secret": "auth-secret-change-me-in-prod",
+      "attributes": {
+        "use.refresh.tokens": "true"
+      }
+    }
+  ],
+
+  "clientScopes": [
+    {
+      "name": "roles",
+      "description": "Scope pour inclure les rôles dans le token",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true"
+      },
+      "protocolMappers": [
+        {
+          "name": "realm-roles-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_roles",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "client-roles-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-client-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "resource_access.${client_id}.roles",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    }
+  ],
+
+  "scopeMappings": [
+    {
+      "client": "plateforme-frontend",
+      "roles": ["USER", "MERCHANT", "ADMIN", "OPERATOR"]
+    }
+  ],
+
+  "users": [
+    {
+      "username": "admin",
+      "email": "admin@plateforme.local",
+      "firstName": "Admin",
+      "lastName": "Plateforme",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["ADMIN", "USER"],
+      "clientRoles": {
+        "plateforme-frontend": ["frontend-user"],
+        "api-gateway": ["gateway-admin"]
+      }
+    },
+    {
+      "username": "user1",
+      "email": "user1@plateforme.local",
+      "firstName": "Yasmine",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "user123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["USER"],
+      "clientRoles": {
+        "plateforme-frontend": ["frontend-user"]
+      }
+    },
+    {
+      "username": "merchant1",
+      "email": "merchant1@plateforme.local",
+      "firstName": "Merchant",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "merchant123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["MERCHANT", "USER"],
+      "clientRoles": {
+        "plateforme-frontend": ["frontend-user"]
+      }
+    }
+  ],
+
+  "browserFlow": "browser",
+  "registrationFlow": "registration",
+  "directGrantFlow": "direct grant",
+  "resetCredentialsFlow": "reset credentials",
+
+  "internationalizationEnabled": true,
+  "supportedLocales": ["fr", "en", "ar"],
+  "defaultLocale": "fr",
+
+  "smtpServer": {
+    "host": "smtp.gmail.com",
+    "port": "587",
+    "auth": "true",
+    "starttls": "true",
+    "from": "noreply@plateforme.local",
+    "fromDisplayName": "Plateforme Électronique"
+  }
+}

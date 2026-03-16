@@ -1,0 +1,141 @@
+# ============================================================
+# CONFIGMAP — Configuration partagée des microservices
+# Eureka est remplacé par le DNS Kubernetes natif
+# Chaque service est joignable via : <service-name>.<namespace>.svc.cluster.local
+# ============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: microservices-config
+  namespace: plateforme-electronique
+data:
+  # ----- Spring profiles -----
+  SPRING_PROFILES_ACTIVE: "kubernetes"
+
+  # ----- Désactivation Eureka (remplacé par DNS K8s) -----
+  EUREKA_CLIENT_ENABLED: "false"
+  SPRING_CLOUD_DISCOVERY_ENABLED: "false"
+
+  # ----- PostgreSQL (via service DNS K8s) -----
+  POSTGRES_HOST: "postgres.plateforme-electronique.svc.cluster.local"
+  POSTGRES_PORT: "5432"
+
+  # ----- Keycloak -----
+  KEYCLOAK_INTERNAL_URL: "http://keycloak.plateforme-electronique.svc.cluster.local:8080"
+  KEYCLOAK_REALM: "plateforme-electronique"
+
+  # ----- Redis -----
+  REDIS_HOST: "redis.plateforme-electronique.svc.cluster.local"
+  REDIS_PORT: "6379"
+
+  # ----- SMTP -----
+  SMTP_HOST: "smtp.gmail.com"
+  SMTP_PORT: "587"
+
+  # ----- URLs internes des services (DNS K8s au lieu d'Eureka) -----
+  INVOICE_SERVICE_URL: "http://invoice-service.plateforme-electronique.svc.cluster.local:8080"
+  PAYMENT_SERVICE_URL: "http://payment-service.plateforme-electronique.svc.cluster.local:8080"
+  SUBSCRIPTION_SERVICE_URL: "http://subscription-service.plateforme-electronique.svc.cluster.local:8080"
+  NOTIFICATION_SERVICE_URL: "http://notification-service.plateforme-electronique.svc.cluster.local:8080"
+  SIGNATURE_SERVICE_URL: "http://signature-service.plateforme-electronique.svc.cluster.local:8080"
+  USER_AUTH_SERVICE_URL: "http://user-auth-service.plateforme-electronique.svc.cluster.local:8080"
+---
+# ============================================================
+# CONFIGMAP — Script d'initialisation PostgreSQL (multi-DB)
+# ============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-scripts
+  namespace: plateforme-electronique
+data:
+  init-databases.sh: |
+    #!/bin/bash
+    set -e
+    
+    echo "=== Création des bases de données ==="
+    
+    for DB in invoice_db payment_db subscription_db notification_db user_auth_db; do
+      echo "Création de la base : $DB"
+      psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
+        SELECT 'CREATE DATABASE $DB'
+        WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$DB')\gexec
+        GRANT ALL PRIVILEGES ON DATABASE $DB TO $POSTGRES_USER;
+    EOSQL
+    done
+    
+    echo "=== Toutes les bases sont prêtes ==="
+---
+# ============================================================
+# CONFIGMAP — Configuration API Gateway (routes sans Eureka)
+# v12 : StripPrefix=0 sur TOUTES les routes
+# Les services reçoivent le path complet /api/xxx/...
+# ============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-config
+  namespace: plateforme-electronique
+data:
+  application-kubernetes.yml: |
+    server:
+      port: 8080
+
+    spring:
+      application:
+        name: api-gateway
+      cloud:
+        gateway:
+          routes:
+            - id: invoice-service
+              uri: http://invoice-service.plateforme-electronique.svc.cluster.local:8080
+              predicates:
+                - Path=/api/invoices/**
+              filters:
+                - StripPrefix=0
+            - id: payment-service
+              uri: http://payment-service.plateforme-electronique.svc.cluster.local:8080
+              predicates:
+                - Path=/api/payments/**
+              filters:
+                - StripPrefix=0
+            - id: subscription-service
+              uri: http://subscription-service.plateforme-electronique.svc.cluster.local:8080
+              predicates:
+                - Path=/api/subscriptions/**
+              filters:
+                - StripPrefix=0
+            - id: notification-service
+              uri: http://notification-service.plateforme-electronique.svc.cluster.local:8080
+              predicates:
+                - Path=/api/notifications/**
+              filters:
+                - StripPrefix=0
+            - id: signature-service
+              uri: http://signature-service.plateforme-electronique.svc.cluster.local:8080
+              predicates:
+                - Path=/api/signatures/**
+              filters:
+                - StripPrefix=0
+            - id: user-auth-service
+              uri: http://user-auth-service.plateforme-electronique.svc.cluster.local:8080
+              predicates:
+                - Path=/api/auth/**
+              filters:
+                - StripPrefix=0
+
+      # Désactivation Eureka
+      eureka:
+        client:
+          enabled: false
+
+      # Redis pour rate limiting
+      data:
+        redis:
+          host: redis.plateforme-electronique.svc.cluster.local
+          port: 6379
+
+    # Keycloak JWT validation
+    spring.security.oauth2.resourceserver.jwt:
+      issuer-uri: http://keycloak.plateforme-electronique.svc.cluster.local:8080/realms/plateforme-electronique
+      jwk-set-uri: http://keycloak.plateforme-electronique.svc.cluster.local:8080/realms/plateforme-electronique/protocol/openid-connect/certs

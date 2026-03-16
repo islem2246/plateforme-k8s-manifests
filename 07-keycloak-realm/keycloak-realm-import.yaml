@@ -1,0 +1,188 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-realm-config
+  namespace: plateforme-electronique
+data:
+  realm-export.json: |
+    {
+      "realm": "plateforme-electronique",
+      "enabled": true,
+      "displayName": "Plateforme Électronique de Paiement",
+      "sslRequired": "none",
+      "registrationAllowed": true,
+      "rememberMe": true,
+      "verifyEmail": false,
+      "resetPasswordAllowed": true,
+      "bruteForceProtected": true,
+      "failureFactor": 5,
+      "accessTokenLifespan": 900,
+      "ssoSessionIdleTimeout": 1800,
+      "defaultSignatureAlgorithm": "RS256",
+      "roles": {
+        "realm": [
+          {"name": "ADMIN", "description": "Administrateur"},
+          {"name": "USER", "description": "Utilisateur standard"},
+          {"name": "MERCHANT", "description": "Marchand"},
+          {"name": "OPERATOR", "description": "Opérateur"}
+        ],
+        "client": {
+          "plateforme-frontend": [{"name": "frontend-user"}]
+        }
+      },
+      "defaultRoles": ["USER"],
+      "requiredCredentials": ["password"],
+      "clients": [
+        {
+          "clientId": "plateforme-frontend",
+          "name": "Frontend React SPA",
+          "enabled": true,
+          "publicClient": true,
+          "standardFlowEnabled": true,
+          "directAccessGrantsEnabled": true,
+          "protocol": "openid-connect",
+          "rootUrl": "http://localhost:30180",
+          "baseUrl": "/",
+          "redirectUris": ["http://localhost:30180/*","http://plateforme.local/*","http://localhost:3000/*"],
+          "webOrigins": ["http://localhost:30180","http://plateforme.local","http://localhost:3000","+"],
+          "attributes": {"pkce.code.challenge.method": "S256"},
+          "defaultClientScopes": ["openid","profile","email","roles","web-origins"]
+        },
+        {
+          "clientId": "api-gateway",
+          "name": "API Gateway",
+          "enabled": true,
+          "publicClient": false,
+          "serviceAccountsEnabled": true,
+          "protocol": "openid-connect",
+          "secret": "gateway-secret-change-me-in-prod",
+          "defaultClientScopes": ["openid","profile","email","roles"]
+        },
+        {
+          "clientId": "payment-service",
+          "enabled": true,
+          "publicClient": false,
+          "bearerOnly": true,
+          "protocol": "openid-connect",
+          "secret": "payment-secret-change-me-in-prod"
+        },
+        {
+          "clientId": "subscription-service",
+          "enabled": true,
+          "publicClient": false,
+          "bearerOnly": true,
+          "protocol": "openid-connect",
+          "secret": "subscription-secret-change-me-in-prod"
+        },
+        {
+          "clientId": "user-auth-service",
+          "enabled": true,
+          "publicClient": false,
+          "serviceAccountsEnabled": true,
+          "protocol": "openid-connect",
+          "secret": "auth-secret-change-me-in-prod"
+        }
+      ],
+      "scopeMappings": [
+        {"client": "plateforme-frontend", "roles": ["USER","MERCHANT","ADMIN","OPERATOR"]}
+      ],
+      "users": [
+        {
+          "username": "admin",
+          "email": "admin@plateforme.local",
+          "firstName": "Admin",
+          "lastName": "Plateforme",
+          "enabled": true,
+          "emailVerified": true,
+          "credentials": [{"type": "password", "value": "admin123", "temporary": false}],
+          "realmRoles": ["ADMIN","USER"],
+          "clientRoles": {"plateforme-frontend": ["frontend-user"]}
+        },
+        {
+          "username": "user1",
+          "email": "user1@plateforme.local",
+          "firstName": "Yasmine",
+          "lastName": "Test",
+          "enabled": true,
+          "emailVerified": true,
+          "credentials": [{"type": "password", "value": "user123", "temporary": false}],
+          "realmRoles": ["USER"],
+          "clientRoles": {"plateforme-frontend": ["frontend-user"]}
+        },
+        {
+          "username": "merchant1",
+          "email": "merchant1@plateforme.local",
+          "firstName": "Merchant",
+          "lastName": "Test",
+          "enabled": true,
+          "emailVerified": true,
+          "credentials": [{"type": "password", "value": "merchant123", "temporary": false}],
+          "realmRoles": ["MERCHANT","USER"],
+          "clientRoles": {"plateforme-frontend": ["frontend-user"]}
+        }
+      ],
+      "internationalizationEnabled": true,
+      "supportedLocales": ["fr","en","ar"],
+      "defaultLocale": "fr"
+    }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-realm-import
+  namespace: plateforme-electronique
+spec:
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: realm-importer
+          image: curlimages/curl:8.5.0
+          command:
+            - sh
+            - -c
+            - |
+              KC="http://keycloak.plateforme-electronique.svc.cluster.local:8080"
+              echo "=== Realm Import ==="
+              echo "[0] Attente Keycloak (max 5 min)..."
+              i=0
+              while [ $i -lt 60 ]; do
+                if curl -sf "$KC/health/ready" >/dev/null 2>&1; then
+                  echo "  OK apres $i tentatives"
+                  break
+                fi
+                i=$((i+1))
+                sleep 5
+              done
+              if [ $i -ge 60 ]; then echo "TIMEOUT"; exit 1; fi
+              sleep 10
+              echo "[1] Token admin..."
+              T=$(curl -sf -X POST "$KC/realms/master/protocol/openid-connect/token" \
+                -d "username=admin&password=admin_password&grant_type=password&client_id=admin-cli" \
+                | sed 's/.*"access_token":"\([^"]*\)".*/\1/')
+              if [ -z "$T" ]; then echo "ERREUR token"; exit 1; fi
+              echo "  OK"
+              echo "[2] Realm existe ?"
+              RC=$(curl -sf -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $T" "$KC/admin/realms/plateforme-electronique" 2>/dev/null || echo 000)
+              if [ "$RC" = "200" ]; then echo "  Realm existe deja - skip"; exit 0; fi
+              echo "[3] Import..."
+              IC=$(curl -s -o /tmp/r.txt -w "%{http_code}" -X POST "$KC/admin/realms" \
+                -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
+                -d @/realm/realm-export.json)
+              if [ "$IC" = "201" ]; then
+                echo "  SUCCES ! Realm importe."
+                echo "  Users: admin/admin123, user1/user123, merchant1/merchant123"
+              else
+                echo "  ERREUR HTTP $IC"
+                cat /tmp/r.txt
+                exit 1
+              fi
+          volumeMounts:
+            - name: realm-config
+              mountPath: /realm
+      volumes:
+        - name: realm-config
+          configMap:
+            name: keycloak-realm-config

@@ -1,0 +1,105 @@
+# ============================================================
+# User Auth Service — Authentification
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-auth-service
+  namespace: plateforme-electronique
+  labels:
+    app: user-auth-service
+    tier: microservice
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: user-auth-service
+  template:
+    metadata:
+      labels:
+        app: user-auth-service
+        tier: microservice
+    spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z postgres.plateforme-electronique.svc.cluster.local 5432; do sleep 3; done']
+        - name: wait-for-keycloak
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z keycloak.plateforme-electronique.svc.cluster.local 8080; do sleep 5; done']
+      containers:
+        - name: user-auth-service
+          image: yassmineg/plateforme-auth-service:latest
+          ports:
+            - containerPort: 8081
+              name: http
+          envFrom:
+            - configMapRef:
+                name: microservices-config
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: "kubernetes"
+            - name: EUREKA_CLIENT_ENABLED
+              value: "false"
+            - name: SPRING_CLOUD_DISCOVERY_ENABLED
+              value: "false"
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:postgresql://postgres.plateforme-electronique.svc.cluster.local:5432/user_auth_db"
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_USER
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+              value: "update"
+            # Keycloak Admin API
+            - name: KEYCLOAK_AUTH_SERVER_URL
+              value: "http://keycloak.plateforme-electronique.svc.cluster.local:8080"
+            - name: KEYCLOAK_REALM
+              value: "plateforme-electronique"
+            - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI
+              value: "http://keycloak.plateforme-electronique.svc.cluster.local:8080/realms/plateforme-electronique"
+          resources:
+            requests:
+              cpu: 150m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            tcpSocket:
+              port: 8081
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8081
+            initialDelaySeconds: 60
+            periodSeconds: 15
+          startupProbe:
+            tcpSocket:
+              port: 8081
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-auth-service
+  namespace: plateforme-electronique
+  labels:
+    app: user-auth-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8081
+      name: http
+  selector:
+    app: user-auth-service

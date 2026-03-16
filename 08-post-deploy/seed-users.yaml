@@ -1,0 +1,87 @@
+# ============================================================
+# Post-Deploy Job — Création des utilisateurs test
+# v12 : Enregistrement via /api/auth/register + tests login
+# À exécuter APRÈS que tous les services soient prêts
+# ============================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seed-users
+  namespace: plateforme-electronique
+spec:
+  backoffLimit: 5
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: seed-users
+          image: curlimages/curl:8.5.0
+          command:
+            - sh
+            - -c
+            - |
+              AUTH="http://user-auth-service.plateforme-electronique.svc.cluster.local:8080"
+              GW="http://api-gateway.plateforme-electronique.svc.cluster.local:8080"
+
+              echo "=== Attente du user-auth-service (max 3 min) ==="
+              i=0
+              while [ $i -lt 36 ]; do
+                if curl -sf "$AUTH/actuator/health" >/dev/null 2>&1 || \
+                   curl -sf -o /dev/null -w "%{http_code}" "$AUTH/api/auth/login" -X POST \
+                   -H "Content-Type: application/json" \
+                   -d '{"email":"probe@test","password":"probe"}' 2>/dev/null | grep -q "4[0-9][0-9]"; then
+                  echo "  user-auth-service est prêt !"
+                  break
+                fi
+                i=$((i+1))
+                sleep 5
+              done
+              if [ $i -ge 36 ]; then echo "TIMEOUT user-auth-service"; exit 1; fi
+              sleep 5
+
+              echo ""
+              echo "=== 1. Créer admin ==="
+              curl -s -X POST "$AUTH/api/auth/register" \
+                -H "Content-Type: application/json" \
+                -d '{"email":"admin@plateforme.local","password":"admin123","firstName":"Admin","lastName":"Plateforme"}'
+              echo ""
+
+              echo "=== 2. Créer user1 ==="
+              curl -s -X POST "$AUTH/api/auth/register" \
+                -H "Content-Type: application/json" \
+                -d '{"email":"user1@plateforme.local","password":"user123","firstName":"Yasmine","lastName":"Test"}'
+              echo ""
+
+              echo "=== 3. Créer merchant1 ==="
+              curl -s -X POST "$AUTH/api/auth/register" \
+                -H "Content-Type: application/json" \
+                -d '{"email":"merchant1@plateforme.local","password":"merchant123","firstName":"Merchant","lastName":"Test"}'
+              echo ""
+
+              echo "=== 4. Login test admin ==="
+              curl -s -X POST "$AUTH/api/auth/login" \
+                -H "Content-Type: application/json" \
+                -d '{"email":"admin@plateforme.local","password":"admin123"}'
+              echo ""
+
+              echo "=== 5. Login test user1 ==="
+              curl -s -X POST "$AUTH/api/auth/login" \
+                -H "Content-Type: application/json" \
+                -d '{"email":"user1@plateforme.local","password":"user123"}'
+              echo ""
+
+              echo "=== 6. Test login via GATEWAY ==="
+              curl -s -X POST "$GW/api/auth/login" \
+                -H "Content-Type: application/json" \
+                -d '{"email":"admin@plateforme.local","password":"admin123"}'
+              echo ""
+
+              echo "=== 7. Test login via FRONTEND (Nginx proxy) ==="
+              curl -s -X POST "http://frontend.plateforme-electronique.svc.cluster.local:80/api/auth/login" \
+                -H "Content-Type: application/json" \
+                -d '{"email":"admin@plateforme.local","password":"admin123"}'
+              echo ""
+
+              echo ""
+              echo "=== SEED USERS TERMINÉ ==="

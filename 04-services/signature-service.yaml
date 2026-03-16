@@ -1,0 +1,77 @@
+# ============================================================
+# Signature Service — Signature électronique
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: signature-service
+  namespace: plateforme-electronique
+  labels:
+    app: signature-service
+    tier: microservice
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: signature-service
+  template:
+    metadata:
+      labels:
+        app: signature-service
+        tier: microservice
+    spec:
+      containers:
+        - name: signature-service
+          image: yassmineg/plateforme_electronique_k8s-signature-service:latest
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - configMapRef:
+                name: microservices-config
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: "kubernetes"
+            - name: EUREKA_CLIENT_ENABLED
+              value: "false"
+            - name: SPRING_CLOUD_DISCOVERY_ENABLED
+              value: "false"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 300m
+              memory: 512Mi
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 15
+          startupProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: signature-service
+  namespace: plateforme-electronique
+  labels:
+    app: signature-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+  selector:
+    app: signature-service
