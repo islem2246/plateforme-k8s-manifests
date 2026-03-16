@@ -77,7 +77,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: yassmineg/plateforme_electronique_k8s-frontend:v1
+          image: yassmineg/plateforme_electronique_k8s-frontend:latest
           ports:
             - containerPort: 80
               name: http
